@@ -53,3 +53,5 @@ VGA_AV.spin
 
 /tmp/
 *.binary
+3d_graphics_test.binary
+*.binary
