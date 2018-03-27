@@ -52,3 +52,4 @@ test.py
 VGA_AV.spin
 
 /tmp/
+*.binary

@@ -1,5 +1,5 @@
-con
-  #1, _setup, _color, _width, _plot, _line, _arc, _vec, _vecarc, _pix, _pixarc, _text, _textarc, _textmode, _fill, _loop
+con         
+  _loop  = 15                                                                                       
     
   max_points = 10
   fov=60
@@ -200,13 +200,13 @@ renderer
                         rdlong  gfxcmdreg, q1
                         
                         mov     timer, cnt
-    main3dloop
+    main3dloop                         
+                        jmp     #main3dloop
                         mov     q1, #1
-                        wrbyte  q1, safeloc
-                        
+                        wrbyte  q1, safeloc 
                         rdbyte  q1, pauseloc
                         test    q1, #1           wz
-                if_z    jmp     #main3dloop
+                if_z    jmp     #main3dloop 
                         rdword  points, num_pts wz
                 if_z    jmp     #endDrawLoop
                         
@@ -237,7 +237,18 @@ renderer
                         
                         mov     index, 0   
                         rdlong  q5, cam_y  
-                        rdlong  q6, cam_z
+                        rdlong  q6, cam_z                         
+':waitloop3
+              '          rdlong  q1, gfxcmdreg   wz                    
+              'if_nz     jmp     #:waitloop3
+
+                        'mov     q1, #1
+                        'wrlong  q1, par   
+                        'mov     q1, _color
+                        'shl     q1, #16
+                        'add     q1, par
+                        'wrlong  q1, gfxcmdreg
+                           
 :subloop                    
                         mov     q1, #1
                         wrbyte  q1, safeloc
@@ -298,10 +309,10 @@ renderer
                         
                         ' LOAD COLOR HERE
                         
+                        
                         mov     q1, #0
                         wrbyte  q1, safeloc
-                        
-                                              
+                                                 
 :waitloop
                         rdlong  q1, gfxcmdreg   wz                    
               if_nz     jmp     #:waitloop
@@ -318,7 +329,7 @@ renderer
 :waitloop2
                         rdlong  q1, gfxcmdreg   wz  ' wait for it to finish                  
               if_nz     jmp     #:waitloop2
-
+                        
                         wrlong  px_,par
                         mov     q1, par
                         add     q1, 4
@@ -484,7 +495,12 @@ convert_ret
 sine_90_                long    $0800                   '90° bit
 sine_180_               long    $1000                   '180° bit
 sine_table_             long    $E000 >> 1              'sine table address shifted right                       
-precision_pasm          long    7                       
+precision_pasm          long    7
+
+
+  _color long 2
+  _plot  long 4
+  _line  long 5                 
                         
 q1                      res     1       'temps
 q2                      res     1
