@@ -55,3 +55,4 @@ VGA_AV.spin
 *.binary
 3d_graphics_test.binary
 *.binary
+*.eeprom
