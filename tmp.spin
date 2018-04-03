@@ -85,6 +85,8 @@ VAR
   long camera_x, camera_y, camera_z 
               
   long camera_yaw, camera_pitch
+
+  long x_const, y_const
   
 OBJ
 
@@ -133,26 +135,42 @@ PUB boot |in, xa, xb, ya, yb, i, c, dx, dy , tmp, red, grn, blu, mask, ext_ptr  
   iowrite[0]:=@iostat
   iowrite[1]:=@iowrite
   iowrite[2]:=@coords
-  iowrite[3]:=x_screen*91/tan(fov/2,91*2) 
-  iowrite[4]:=y_screen*91/tan(y_fov/2,91*2)  
+  iowrite[3]:=x_const:=x_screen*91/tan(fov/2,91*2) 
+  iowrite[4]:=y_const:=y_screen*91/tan(y_fov/2,91*2)  
   iowrite[5]:=@camera_x
   iowrite[6]:=@vram
   iostat:=0       
   cognew(@renderer, @iowrite)
-
-  camera_yaw:=camera_pitch:=120
+                             
+  camera_yaw:=camera_pitch:=358
   
-  pst.str(string("sending command 255...",$D)) 
+  pst.str(string("sending command 255...",$D))     
   iowrite[0]:=$8000
-  VRAM[0]:=5
-  VRAM[1]:=5
-  VRAM[2]:=5
-  translatef(-70,20,20) 
-  iostat:=255
-  pst.str(string("getting telemetry...",$D)) 
-  pst.dec(coords[0])
+  VRAM[0]:=10
+  VRAM[1]:=10
+  VRAM[2]:=10         
+  translatef(350,20,20)
+  rotatef(176,0)
+  iostat:=255                      
+  pst.str(string("getting telemetry...",$D))
+  if(coords[0]>32768)
+    pst.dec(coords[0]-65536)
+  else 
+    pst.dec(coords[0])
+  pst.char($D)       
+  if(coords[1]>32768)
+    pst.dec(coords[1]-65536)
+  else 
+    pst.dec(coords[1])
   pst.char($D)
-  pst.dec(coords[1])
+  xlate(VRAM[0],VRAM[1],VRAM[2]) 
+  pst.dec(x)
+  pst.char($D)    
+  pst.dec(y)
+  pst.char($D)  
+  pst.dec(x_const)
+  pst.char($D)    
+  pst.dec(y_const)
   pst.char($D)   
   
 pub translatef(x1,y1,z1) 
@@ -234,7 +252,30 @@ PRI newline
       longfill(y + y_clear, 0, y_clear_longs)
     y := y_max
   x := 0    
+pub translate_x(xa,za)
+  return (x_const*za/xa)    
+pub translate_y(xa,ya)
+  return y_const*ya/xa      
+pri xlate (a,b,c)| x1 ,y1, jx, jy, jz, d, cost2, sint2, sint, cost 
+  sint:=sin(camera_yaw,128)
+  cost:=cos(camera_yaw,128)       
+  sint2:=sin(camera_pitch,128)
+  cost2:=cos(camera_pitch,128) 
 
+  ' get position relative to camera
+  jx:=camera_x-a
+  jy:=camera_y-b
+  jz:=camera_z-c
+  ' rotate point around the camera
+        
+  d :=(jx*cost-jz*sint)/128 
+  jy:=(d*sint2+jy*cost2)/128
+  jz:=(jx*sint+jz*cost)/128
+
+  ' calculate screen coordinate
+        
+  x:=translate_x(d,jz)                          
+  y:=translate_y(d,jy) 
 DAT
 
 vgaparams               long    0               'status
@@ -302,22 +343,22 @@ renderer
                         ' Get temporary trig constants for camera rotation
                         mov     q5, camarg
                         add     q5, #12    ' yaw
-                        rdlong  q4, q5
-                        mov     q1, q4
+                        rdlong  q6, q5
+                        mov     q1, q6
                         call    #sin_
                         mov s1, q1
                                                  
-                        mov     q1, q4
+                        mov     q1, q6
                         call    #cos_
                         mov c1, q1
                         
                         add     q5, #4   ' @yaw+4=@pitch
-                        rdlong  q4, q5 
-                        mov     q1, q4
+                        rdlong  q6, q5 
+                        mov     q1, q6
                         call    #sin_
                         mov     s2, q1
                                                    
-                        mov     q1, q4
+                        mov     q1, q6
                         call    #cos_ 
                         mov     c2, q1
                         
@@ -416,22 +457,38 @@ renderer
 '               q2 = 16-bit multiplier
 '
 '   out:        q1 = 32-bit product
-'
-multiply_
+'                    
+multiply_       ' setup
+                                       
                         mov     q4, q1
                         xor     q4, q2
                         abs     q1, q1
                         abs     q2, q2
-                        mov     q3,#16
-                        shl     q2,#16
-                        shr     q1,#1           wc
 
-:loop   if_c            add     q1,q2           wc
-                        rcr     q1,#1           wc
-                        djnz    q3,#:loop
+                        mov       vRes, #0      ' Primary accumulator (and final result)   
+                        mov       tmp1, q1      ' Both my secondary accumulator,
+                        shl       tmp1, #16     ' and the lower 16 bits of v1.    
+                        mov       tmp2, q2      ' This is the upper 16 bits of v2,
+                        shr       tmp2, #16     ' which will sum into my 2nd accumulator.
+                        mov       temp, #16        ' Instead of 4 instructions 32x, do 6 instructions 16x.          
+:loop                   ' v1_hi_lo * v2_lo
+                        shr       q2, #1 wc     ' get the low bit of v2          
+                  if_c  add       vRes, q1      ' (conditionally) sum v1 into my 1st accumulator
+                        shl       q1, #1        ' bit align v1 for the next pass 
+                        ' v1_lo * v2_hi
+                        shl       tmp1, #1 wc   ' get the high bit of v1_lo, *AND* shift my 2nd accumulator
+                  if_c  add       tmp1, tmp2    ' (conditionally) add v2_hi into the 2nd accumulator
+                        ' repeat 16x
+                        djnz      temp, #:loop     ' I can't think of a way to early exit this
+                        ' finalize
+                        shl       tmp1, #16     ' align my 2nd accumulator
+                        add       vRes, tmp1    ' and add its contribution
+                        mov       q1, vRes
+                       
                         shl     q4,#1           wc
               if_c      neg     q1, q1
-multiply__ret           ret
+                     
+multiply__ret             ret  
 
 divide                  
                         mov     q4, q1
@@ -439,52 +496,55 @@ divide
                         abs     q1, q1
                         abs     q2, q2
                         
-                        shl     q2,#15            'get divisor into y[30..15]
-                        mov     q3,#16            'ready for 16 quotient bits
-:loop                   cmpsub  q1,q2       wc    'y =< x? Subtract it, quotient bit in c
-                        rcl     q1,#1             'rotate c into quotient, shift dividend
-                        djnz    q3,#:loop         'loop until done  
+                        mov     temp,#32                ' Divide a 32 bit unsigned dividend
+                        mov     remainder,#0            '  by a 32 bit unsigned divisor to
+                        
+:loop                   shl     q1,#1        wc   '  get a 32 bit unsigned quotient
+                        rcl     remainder,#1            '  and a 32 bit unsigned remainder
+                        cmpsub  remainder,q2  wc,wr
+                        rcl     q3,#1
+                        djnz    temp,#:loop
+
+                        mov q1, q3
+                                     
                         shl     q4,#1       wc
               if_c      neg     q1, q1
-divide_ret              ret                      'quotient in x[15..0],
-                                                 'remainder in x[31..16]
+                        
+divide_ret              ret
+temp                    long    0   
+remainder               long    0   
+
 
 cos_
                         add     q1, #90
 sin_
                         mov     q2, #91
                         call    #multiply_
-                        sar     q1, #2
-                        mov     q3, q1
-                        mov     q2, q1
-                        and     q2, sine_90_   wz
-                  if_nz neg     q1, q1
-                        or      q1, sine_table_
-                        shl     q1, #1
-                        rdword  q2, q1
-                        and     q3, sine_180_  wz
-                  if_nz neg     q2, q2
-                        mov     q1, q2
+                        sar     q1, #2        
+                        test    q1, sin_90 wc           'get quadrant 2|4 into c
+                        test    q1, sin_180 wz          'get quadrant 3|4 into nz
+                        negc    q1, q1                  'if quadrant 2|4, negate offset
+                        or      q1,sin_table            'or in sin table address >> 1
+                        shl     q1,#1                   'shift left to get final word address
+                        rdword  q1,q1                   'read word sample from $E000 to $F000
+                        negnz   q1,q1                   'if quadrant 3|4, negate sample
                         shl     q1, precision_pasm  
                         sar     q1, #16
 cos__ret
 sin__ret
                         ret       
-convert
-                        mov dx_, s1
-                        mov dy_, c2
-                        jmp #convert_ret
+convert                               
                         mov     q6, qz
                         ' start by recalculating qz because it relies on unmodified qx          
                         mov     q1, qx
                         mov     q2, s1
                         call    #multiply_
-                        mov     q4, q1
+                        mov     q5, q1
                         mov     q1, qz
                         mov     q2, c1
                         call    #multiply_
-                        add     q4, q1
-                        mov     qz, q4
+                        add     q5, q1
+                        mov     qz, q5
                         sar     qz, precision_pasm                                         
 
                         ' qx next for calculating qy
@@ -492,12 +552,12 @@ convert
                         mov     q1, qx
                         mov     q2, c1
                         call    #multiply_
-                        mov     q4, q1
+                        mov     q5, q1
                         mov     q1, q6
                         mov     q2, s1
                         call    #multiply_
-                        sub     q4, q1
-                        mov     qx, q4
+                        sub     q5, q1
+                        mov     qx, q5
                         sar     qx, precision_pasm
 
                         ' finish with qy
@@ -505,12 +565,12 @@ convert
                         mov     q1, qx
                         mov     q2, s2
                         call    #multiply_
-                        mov     q4, q1
+                        mov     q5, q1
                         mov     q1, qy
                         mov     q2, c2
                         call    #multiply_
-                        add     q4, q1
-                        mov     qy, q4
+                        add     q5, q1
+                        mov     qy, q5
                         sar     qy, precision_pasm
                         
                         ' now we need to translate the coordinates
@@ -536,11 +596,11 @@ convert_ret
                         
                         
  
-sine_90_                long    $0800                   '90 degree bit
-sine_180_               long    $1000                   '180 degree bit
-sine_table_             long    $E000 >> 1              'sine table address shifted right
+sin_90                  long    $0800                   '90 degree bit
+sin_180                 long    $1000                   '180 degree bit
+sin_table               long    $E000 >> 1              'sine table address shifted right
 ram_mask                long    $7FFF                  
-precision_pasm          long    10
+precision_pasm          long    7
                                  
 
   _color long 2
@@ -549,10 +609,16 @@ precision_pasm          long    10
                         
 q1                      res     1       'temps
 q2                      res     1
-q3                      res     1
+q3                      res     1  
 q4                      res     1   
 q5                      res     1 
 q6                      res     1
+
+
+tmp1                    res     1   
+tmp2                    res     1 
+vRes                    res     1
+
 camx                    res     1
 camy                    res     1
 camz                    res     1
